@@ -20,6 +20,8 @@ import warnings
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 
+_UNICODE_NOISE = re.compile(r"[​‌‍﻿­]+")  # zero-width spaces / soft-hyphen in iXBRL filings
+
 def html_to_lines(path: Path) -> list[str]:
     """Parse a DEF 14A HTML file and return cleaned, non-empty lines."""
     try:
@@ -27,6 +29,7 @@ def html_to_lines(path: Path) -> list[str]:
     except Exception:
         return []
     text = soup.get_text(separator="\n", strip=True)
+    text = _UNICODE_NOISE.sub("", text)
     return [l.strip() for l in text.splitlines() if l.strip()]
 
 
@@ -57,7 +60,7 @@ _COMP_START = re.compile(
 
 _COMP_END = re.compile(
     r"(grants of plan.based awards|outstanding equity awards|"
-    r"option exercises|pension benefits|nonqualified deferred|"
+    r"option exercises|pension benefits|nonqualified deferred compensation plan|"
     r"potential payments|pay versus performance|ceo pay ratio|"
     r"director compensation)",
     re.IGNORECASE,
@@ -162,8 +165,12 @@ def extract_compensation_section(lines: list[str]) -> str:
       these earlier false matches.
     """
     summary_pat = re.compile(r"summary compensation table", re.IGNORECASE)
+    # "Summary Compensation Table Total/Amount" are Pay-vs-Performance column
+    # labels, not section headers — exclude them to avoid picking the PvP table.
+    pvp_suffix = re.compile(r"summary compensation table\s+(total|amount)", re.IGNORECASE)
     short_matches = [i for i, l in enumerate(lines)
-                     if summary_pat.search(l) and len(l) < 40]
+                     if summary_pat.search(l) and len(l) < 40
+                     and not pvp_suffix.search(l)]
 
     if short_matches:
         # Filter TOC entries: next line is a bare page number (1-3 digits)
