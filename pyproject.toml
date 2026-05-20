@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "def14a-parser"
+version = "0.1.0"
+description = "Extract CEO compensation and governance data from SEC DEF 14A proxy statements via a local LLM (Ollama)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Alexander Walsh", email = "alexander.walsh@gmail.com" }]
+keywords = ["sec", "edgar", "proxy", "def14a", "executive-compensation", "llm", "ollama"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "requests>=2.31",
+    "click>=8.1",
+    "tqdm>=4.66",
+]
+
+[project.scripts]
+def14a = "def14a.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ajwalsh08/def14a-parser"
+Repository = "https://github.com/ajwalsh08/def14a-parser"
+Issues = "https://github.com/ajwalsh08/def14a-parser/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["def14a*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
