@@ -72,7 +72,7 @@ PROXY STATEMENT SECTION:
 {text}"""
 
 
-def _chat(prompt: str, model: str = DEFAULT_MODEL, timeout: int = 150) -> str:
+def _chat(prompt: str, model: str = DEFAULT_MODEL, timeout: int = 180) -> str:
     """Send a single chat message to a local Ollama model."""
     try:
         resp = requests.post(
