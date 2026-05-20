@@ -60,7 +60,7 @@ _COMP_START = re.compile(
 
 _COMP_END = re.compile(
     r"(grants of plan.based awards|outstanding equity awards|"
-    r"option exercises|pension benefits|nonqualified deferred compensation plan|"
+    r"option exercises|pension benefits|nonqualified deferred compensation(?! earnings)|"
     r"potential payments|pay versus performance|ceo pay ratio|"
     r"director compensation)",
     re.IGNORECASE,
