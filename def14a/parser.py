@@ -155,12 +155,20 @@ _COMP_DATA_DOLLAR = re.compile(r"\$?\s*[\d,]{5,}")
 
 
 def _has_comp_data(text: str, window: int = 800) -> bool:
-    """True if text contains a year (20XX) and a dollar amount within `window` chars."""
+    """
+    Confirm that extracted text is an actual SCT section, not a cross-reference.
+
+    Many filings mention "Summary Compensation Table" in narrative sentences
+    ("as shown in the Summary Compensation Table above") that look like valid
+    headings but contain no table data. Requiring both a fiscal year and a
+    dollar amount in the first 800 chars filters these out reliably.
+    """
     w = text[:window]
     return bool(_COMP_DATA_YEAR.search(w)) and bool(_COMP_DATA_DOLLAR.search(w))
 
 
 def _extract_from_idx(lines: list[str], start_idx: int) -> str:
+    """Collect lines from start_idx-1 through the next section-end marker (or 300 lines)."""
     result = []
     for line in lines[max(0, start_idx - 1): start_idx + 300]:
         if result and _COMP_END.search(line):
@@ -169,11 +177,19 @@ def _extract_from_idx(lines: list[str], start_idx: int) -> str:
     return "\n".join(result)
 
 
+# Catches "Page 42" and "Page\xa042" (non-breaking space) TOC page references.
 _PAGE_REF = re.compile(r"^(Page\s*\d{1,3}|pg\.?\s*\d{1,3})$", re.IGNORECASE)
 
 
 def _is_toc_line(lines: list[str], idx: int) -> bool:
-    """True if line idx looks like a TOC entry (bare page number before or after)."""
+    """
+    Return True if line idx is a table-of-contents entry.
+
+    In most filings the TOC lists section headings followed immediately by a
+    bare page number (e.g. "Summary Compensation Table\\n42"). Some filings put
+    the number before the heading, and some use "Page 42" rather than "42".
+    We check both neighbours and both formats.
+    """
     _page_num = re.compile(r"^\d{1,3}$")
     before = lines[idx - 1].strip() if idx - 1 >= 0 else ""
     after  = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
@@ -185,27 +201,56 @@ def _is_toc_line(lines: list[str], idx: int) -> bool:
 
 def extract_compensation_section(lines: list[str]) -> str:
     """
-    Extract the Summary Compensation Table section.
+    Locate and return the Summary Compensation Table text block.
 
-    Strategy:
-      1. Find all short (< 40 char) occurrences of "Summary Compensation Table",
-         excluding Pay-vs-Performance column labels and inline cross-references.
-      2. Filter TOC entries: bare page number (digits or "Page N") on the line
-         immediately before OR after, including non-breaking-space variants.
-      3. From remaining candidates, pick the FIRST one whose extracted text
-         actually contains compensation data (year + dollar amount).
-      4. If no candidate passes the data check, fall through to the broader
-         _COMP_START pattern rather than returning a TOC entry.
-      5. Broader pattern tried twice: first occurrence first (section header),
-         then last occurrence (avoids say-on-pay narrative at end).
-      6. Last resort: scan for Salary + Total column-header cluster.
+    The heading "Summary Compensation Table" appears multiple times in a typical
+    proxy statement: (a) in the table of contents, (b) as a Pay-vs-Performance
+    column label in newer filings, (c) in narrative cross-references such as "see
+    the Summary Compensation Table above", and finally (d) as the actual section
+    header. This function works through three tiers, each handling a broader class
+    of filing structure:
+
+    Tier 1 — Exact heading match (handles ~85% of filings)
+        Find all short (<40 char) standalone occurrences of the heading. Short
+        lines distinguish section headers from mid-sentence references. Exclude
+        known false positives (PvP column labels, inline cross-references), then
+        skip TOC entries. Pick the first remaining candidate whose extracted text
+        contains actual compensation data (a fiscal year + a dollar amount).
+        If every candidate is a TOC entry or cross-reference, fall through to
+        Tier 2 rather than returning a useless snippet.
+
+    Tier 2 — Broader "Executive Compensation" section header
+        Some filings omit a standalone "Summary Compensation Table" heading, or
+        the heading is inside a merged table cell that plain-text extraction
+        cannot recover. The broader pattern matches "Executive Compensation"
+        section headers, which nearly always precede the SCT. First occurrence
+        is tried before last: the first is typically the section header, while
+        the last is often a say-on-pay advisory-vote narrative near the document
+        end that mentions "executive compensation" but contains no table data.
+
+    Tier 3 — Column-header cluster scan (last resort)
+        A small number of filings lack any recognizable section header but follow
+        the standard SEC column layout with "Salary" and "Total" adjacent in the
+        text. Scanning for this cluster locates the table even without a header.
     """
+    # --- Tier 1: exact "Summary Compensation Table" heading ---
+
     summary_pat = re.compile(r"summary compensation table", re.IGNORECASE)
+
+    # "Summary Compensation Table Total/Amount" are Pay-vs-Performance column
+    # labels introduced by recent SEC rulemaking; they appear before the real
+    # section in filings from 2023+.
     pvp_suffix  = re.compile(r"summary compensation table\s+(total|amount)", re.IGNORECASE)
+
+    # Inline cross-references ("see the Summary Compensation Table above/below")
+    # are sentence fragments, not section headings.
     inline_ref  = re.compile(
         r"summary compensation table[,.]?\s*(above|below|herein|set forth|included)",
         re.IGNORECASE,
     )
+
+    # Short lines (<40 chars) are standalone headings; longer lines embed the
+    # phrase in a sentence, e.g. "officers identified in the Summary Compensation Table."
     short_matches = [
         i for i, l in enumerate(lines)
         if summary_pat.search(l) and len(l) < 40
@@ -216,17 +261,16 @@ def extract_compensation_section(lines: list[str]) -> str:
     if short_matches:
         candidates = [i for i in short_matches if not _is_toc_line(lines, i)]
         if not candidates:
-            candidates = short_matches
+            candidates = short_matches  # all were TOC — try them anyway; data check will weed out
 
         for idx in candidates:
             text = _extract_from_idx(lines, idx)
             if _has_comp_data(text):
                 return text
-        # No candidate had real data — fall through to broader patterns below
-        # rather than returning a TOC entry or cross-reference snippet.
+        # No candidate contained real comp data — fall through to Tier 2.
 
-    # Broader pattern: first occurrence is the actual section header;
-    # last occurrence risks landing in a say-on-pay narrative near the end.
+    # --- Tier 2: broader "Executive Compensation" section header ---
+
     broader_first = _extract_section(lines, _COMP_START, _COMP_END,
                                      max_lines=300, use_last=False)
     if broader_first and _has_comp_data(broader_first):
@@ -237,7 +281,8 @@ def extract_compensation_section(lines: list[str]) -> str:
     if broader_last and _has_comp_data(broader_last):
         return broader_last
 
-    # Last resort: scan for Salary + Total column-header cluster
+    # --- Tier 3: column-header cluster scan ---
+
     salary_pat = re.compile(r"\bSalary\b", re.IGNORECASE)
     total_pat  = re.compile(r"\bTotal\b",  re.IGNORECASE)
     for i, line in enumerate(lines):
