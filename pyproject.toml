@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "def14a-parser"
-version = "0.2.0"
+version = "0.3.0"
 description = "Extract CEO compensation and governance data from SEC DEF 14A proxy statements via a local LLM (Ollama)"
 readme = "README.md"
 license = { text = "MIT" }

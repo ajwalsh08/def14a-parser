@@ -48,10 +48,12 @@ Rules:
 - CEO column: yes if this person is the CEO or Principal Executive Officer, else no
 - Use 0 for any cell that shows a dash or is blank
 - Never put "yes" or "no" in the Name column
+- Copy names exactly as they appear in the document — do not invent or substitute names
+- If you cannot find a person's actual name in the document, write UNKNOWN in the Name column
 
-Example output:
-Jane Doe | Chief Executive Officer | yes | 2023 | 850000 | 3200000
-John Smith | Chief Financial Officer | no | 2023 | 520000 | 1100000
+Format example (do not copy these names — use only names that appear in the document):
+[Full Name] | [Title] | yes | [Year] | [Salary] | [Total]
+[Full Name] | [Title] | no  | [Year] | [Salary] | [Total]
 
 COMPENSATION TABLE:
 {text}"""
