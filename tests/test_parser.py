@@ -73,6 +73,62 @@ class TestExtractCompSection:
     def test_empty_file(self):
         assert extract_compensation_section([]) == ""
 
+    def test_skips_toc_page_number_before(self):
+        """TOC entry with page number on the line BEFORE the heading."""
+        lines = _lines("""
+            42
+            Summary Compensation Table
+            More table of contents...
+            Summary Compensation Table
+            Name and Principal Position
+            Year
+            Salary
+            John Smith | CEO | 2023 | 500000 | 1200000
+        """)
+        result = extract_compensation_section(lines)
+        assert "John Smith" in result
+
+    def test_skips_toc_page_n_format(self):
+        """TOC with 'Page 42' format (non-digit page reference) is filtered."""
+        lines = _lines("""
+            Summary Compensation Table
+            Page 42
+            Other content
+            Summary Compensation Table
+            The table below summarizes compensation for 2023.
+            Jane Doe | CEO | 2023 | 700000 | 2000000
+        """)
+        result = extract_compensation_section(lines)
+        assert "Jane Doe" in result
+
+    def test_all_toc_entries_falls_through_to_broader(self):
+        """When every short match is a TOC entry, fall through to Executive Compensation."""
+        lines = _lines("""
+            Summary Compensation Table
+            38
+            EXECUTIVE COMPENSATION
+            The following shows compensation for named executive officers.
+            John Smith | CEO | 2023 | 600000 | 1500000
+            Grants of Plan-Based Awards
+            More content.
+        """)
+        result = extract_compensation_section(lines)
+        assert "John Smith" in result
+
+    def test_pvp_column_label_excluded(self):
+        """'Summary Compensation Table Total' is a PvP column label, not a heading."""
+        lines = _lines("""
+            Summary Compensation Table Total for PEO
+            Some Pay-vs-Performance table content
+            Summary Compensation Table
+            Name and Principal Position
+            Year
+            Salary
+            Jane Doe | CEO | 2023 | 800000 | 2500000
+        """)
+        result = extract_compensation_section(lines)
+        assert "Jane Doe" in result
+
 
 # ── _parse_comp_table (via extractor module) ───────────────────────────────
 

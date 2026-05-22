@@ -150,46 +150,101 @@ def extract_director_section(lines: list[str]) -> str:
     return "\n".join(result)
 
 
+_COMP_DATA_YEAR   = re.compile(r"\b20[12]\d\b")
+_COMP_DATA_DOLLAR = re.compile(r"\$?\s*[\d,]{5,}")
+
+
+def _has_comp_data(text: str, window: int = 800) -> bool:
+    """True if text contains a year (20XX) and a dollar amount within `window` chars."""
+    w = text[:window]
+    return bool(_COMP_DATA_YEAR.search(w)) and bool(_COMP_DATA_DOLLAR.search(w))
+
+
+def _extract_from_idx(lines: list[str], start_idx: int) -> str:
+    result = []
+    for line in lines[max(0, start_idx - 1): start_idx + 300]:
+        if result and _COMP_END.search(line):
+            break
+        result.append(line)
+    return "\n".join(result)
+
+
+_PAGE_REF = re.compile(r"^(Page\s*\d{1,3}|pg\.?\s*\d{1,3})$", re.IGNORECASE)
+
+
+def _is_toc_line(lines: list[str], idx: int) -> bool:
+    """True if line idx looks like a TOC entry (bare page number before or after)."""
+    _page_num = re.compile(r"^\d{1,3}$")
+    before = lines[idx - 1].strip() if idx - 1 >= 0 else ""
+    after  = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
+    return (
+        bool(_page_num.match(before)) or bool(_page_num.match(after)) or
+        bool(_PAGE_REF.match(before)) or bool(_PAGE_REF.match(after))
+    )
+
+
 def extract_compensation_section(lines: list[str]) -> str:
     """
     Extract the Summary Compensation Table section.
 
-    Challenges solved:
-    - TOC entries: the heading "Summary Compensation Table" appears in the
-      table of contents (followed by a page number) before the actual section.
-      We filter these out by detecting when the next line is a bare 1-3 digit
-      page number.
-    - Compensation Actually Paid (CAP) references: some filings embed the
-      heading as a column label in the Pay vs Performance reconciliation table
-      before the real section. Taking the *last* surviving candidate avoids
-      these earlier false matches.
+    Strategy:
+      1. Find all short (< 40 char) occurrences of "Summary Compensation Table",
+         excluding Pay-vs-Performance column labels and inline cross-references.
+      2. Filter TOC entries: bare page number (digits or "Page N") on the line
+         immediately before OR after, including non-breaking-space variants.
+      3. From remaining candidates, pick the FIRST one whose extracted text
+         actually contains compensation data (year + dollar amount).
+      4. If no candidate passes the data check, fall through to the broader
+         _COMP_START pattern rather than returning a TOC entry.
+      5. Broader pattern tried twice: first occurrence first (section header),
+         then last occurrence (avoids say-on-pay narrative at end).
+      6. Last resort: scan for Salary + Total column-header cluster.
     """
     summary_pat = re.compile(r"summary compensation table", re.IGNORECASE)
-    # "Summary Compensation Table Total/Amount" are Pay-vs-Performance column
-    # labels, not section headers — exclude them to avoid picking the PvP table.
-    pvp_suffix = re.compile(r"summary compensation table\s+(total|amount)", re.IGNORECASE)
-    short_matches = [i for i, l in enumerate(lines)
-                     if summary_pat.search(l) and len(l) < 40
-                     and not pvp_suffix.search(l)]
+    pvp_suffix  = re.compile(r"summary compensation table\s+(total|amount)", re.IGNORECASE)
+    inline_ref  = re.compile(
+        r"summary compensation table[,.]?\s*(above|below|herein|set forth|included)",
+        re.IGNORECASE,
+    )
+    short_matches = [
+        i for i, l in enumerate(lines)
+        if summary_pat.search(l) and len(l) < 40
+        and not pvp_suffix.search(l)
+        and not inline_ref.search(l)
+    ]
 
     if short_matches:
-        # Filter TOC entries: next line is a bare page number (1-3 digits)
-        candidates = [
-            i for i in short_matches
-            if not (i + 1 < len(lines)
-                    and re.match(r"^\d{1,3}$", lines[i + 1].strip()))
-        ]
-        # Prefer the last candidate — skips CAP table column-header references
-        # that appear before the actual section in some filings
-        start_idx = candidates[-1] if candidates else short_matches[-1]
+        candidates = [i for i in short_matches if not _is_toc_line(lines, i)]
+        if not candidates:
+            candidates = short_matches
 
-        result = []
-        for line in lines[max(0, start_idx - 1): start_idx + 300]:
-            if result and _COMP_END.search(line):
-                break
-            result.append(line)
-        return "\n".join(result)
+        for idx in candidates:
+            text = _extract_from_idx(lines, idx)
+            if _has_comp_data(text):
+                return text
+        # No candidate had real data — fall through to broader patterns below
+        # rather than returning a TOC entry or cross-reference snippet.
 
-    # Fallback: broader "executive compensation" pattern, last occurrence
-    return _extract_section(lines, _COMP_START, _COMP_END,
-                            max_lines=300, use_last=True)
+    # Broader pattern: first occurrence is the actual section header;
+    # last occurrence risks landing in a say-on-pay narrative near the end.
+    broader_first = _extract_section(lines, _COMP_START, _COMP_END,
+                                     max_lines=300, use_last=False)
+    if broader_first and _has_comp_data(broader_first):
+        return broader_first
+
+    broader_last = _extract_section(lines, _COMP_START, _COMP_END,
+                                    max_lines=300, use_last=True)
+    if broader_last and _has_comp_data(broader_last):
+        return broader_last
+
+    # Last resort: scan for Salary + Total column-header cluster
+    salary_pat = re.compile(r"\bSalary\b", re.IGNORECASE)
+    total_pat  = re.compile(r"\bTotal\b",  re.IGNORECASE)
+    for i, line in enumerate(lines):
+        if salary_pat.search(line):
+            if total_pat.search("\n".join(lines[i: i + 5])):
+                text = _extract_from_idx(lines, i)
+                if _has_comp_data(text):
+                    return text
+
+    return broader_last or ""
