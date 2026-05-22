@@ -129,6 +129,22 @@ class TestExtractCompSection:
         result = extract_compensation_section(lines)
         assert "Jane Doe" in result
 
+    def test_sentence_final_period_excluded(self):
+        """BeautifulSoup can split a sentence-final reference onto its own line:
+        'Summary Compensation Table.' — the trailing period with nothing after
+        marks a sentence end, not a section heading."""
+        lines = _lines("""
+            The compensation disclosed above is summarized in the
+            Summary Compensation Table.
+            EXECUTIVE COMPENSATION
+            The table below shows compensation for named executive officers.
+            Jane Doe | CEO | 2023 | 750000 | 2100000
+            Grants of Plan-Based Awards
+        """)
+        result = extract_compensation_section(lines)
+        # Should fall through to Tier 2 (Executive Compensation), not pick up the sentence fragment
+        assert "Jane Doe" in result
+
 
 # ── _parse_comp_table (via extractor module) ───────────────────────────────
 

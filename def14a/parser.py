@@ -249,6 +249,12 @@ def extract_compensation_section(lines: list[str]) -> str:
         re.IGNORECASE,
     )
 
+    # BeautifulSoup splits sentence-final references onto their own line when
+    # the period lands at a tag boundary, yielding "Summary Compensation Table."
+    # as a short standalone line that looks like a section heading. A trailing
+    # period with nothing after it marks a sentence end, not a heading.
+    sentence_end = re.compile(r"summary compensation table\.$", re.IGNORECASE)
+
     # Short lines (<40 chars) are standalone headings; longer lines embed the
     # phrase in a sentence, e.g. "officers identified in the Summary Compensation Table."
     short_matches = [
@@ -256,6 +262,7 @@ def extract_compensation_section(lines: list[str]) -> str:
         if summary_pat.search(l) and len(l) < 40
         and not pvp_suffix.search(l)
         and not inline_ref.search(l)
+        and not sentence_end.search(l)
     ]
 
     if short_matches:
